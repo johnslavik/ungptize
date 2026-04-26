@@ -4,14 +4,49 @@
     {
       "id": "happy-path-english",
       "prompt": "ungptize this for me:\n\nThis pivotal release boasts a vibrant tapestry of features, fostering not just productivity, but a meticulous, robust, intricate experience. The library serves as a key showcase of our work — and stands as a testament to the team's enduring commitment.",
-      "expected_output": "The agent runs scripts/scan.py on the input, identifies hits across multiple categories (vocabulary cluster, copulative avoidance, negative parallelism, tricolon), produces a substantially shorter rewrite that preserves the factual claims (a release with features; a library), and returns a tell-by-tell change log naming each category and the original phrasing.",
+      "expected_output": "The agent runs scripts/scan.py for the fact sheet, spawns a detector subagent (or otherwise produces an exhaustive inventory) covering vocabulary cluster, copulative avoidance, negative parallelism, and tricolon. The inventory appears BEFORE the rewrite. The rewrite is substantially shorter, preserves the factual claims (a release with features; a library), and the change log is the inventory filtered to `rewrite` rows.",
       "files": [],
       "assertions": [
-        "The response contains a rewritten version of the input prose",
-        "The response contains a change log section listing at least three of the categories: vocabulary, copulative-avoidance, negative-parallelism, tricolon",
+        "The response contains an inventory section before the rewrite (e.g., a heading like '## Inventory' or a clearly labelled list of findings precedes the rewritten prose)",
+        "The inventory uses the prescribed row format (line/paragraph reference, category, exact phrase, verdict, one-line why)",
+        "The inventory covers at least three of the categories: vocab, copulative, neg-parallel, tricolon",
         "The rewrite drops or replaces 'pivotal', 'boasts', 'vibrant', 'tapestry', 'fostering', 'meticulous', 'robust', 'intricate', 'serves as', 'stands as', 'testament', 'enduring' (at least 8 of these are gone)",
         "The rewrite does not invent new factual content not present in the original",
-        "The rewrite is shorter than the original by character count"
+        "The rewrite is shorter than the original by character count",
+        "The change log traces back to inventory rows (every change log entry corresponds to a `rewrite` verdict in the inventory)"
+      ]
+    },
+    {
+      "id": "neg-parallel-regression",
+      "prompt": "ungptize this:\n\nWhen my piano teacher fired me, I thought I'd failed. Looking back, the firing wasn't a failure — it was the beginning of progress. The problem wasn't that I couldn't play the étude. It was that I'd stopped listening to it. I didn't need a new teacher; I needed a new ear. So I stopped drilling the passage and started listening to it. Don't repeat. Hear.",
+      "expected_output": "The agent's inventory catches the full negative-parallelism family: em-dash antithesis ('wasn't a failure — it was the beginning'), 'wasn't that X. It was that Y.', semicolon antithesis with verb ('didn't need X; I needed Y'), and imperative antithesis ('Don't repeat. Hear.'). The rewrite collapses the decorative antitheses while keeping the genuine narrative content.",
+      "files": [],
+      "assertions": [
+        "The inventory flags 'wasn't a failure — it was the beginning of progress' as negative-parallelism (em-dash antithesis)",
+        "The inventory flags 'wasn't that I couldn't play the étude. It was that I'd stopped listening' as negative-parallelism",
+        "The inventory flags 'didn't need a new teacher; I needed a new ear' as negative-parallelism (semicolon antithesis)",
+        "The inventory flags 'Don't repeat. Hear.' as negative-parallelism (imperative antithesis)",
+        "The rewrite preserves the narrative spine (teacher fired the writer; the writer changed how they practised)",
+        "The rewrite removes at least three of the four decorative antitheses",
+        "The rewrite does not invent details (e.g., named pieces, durations, or new characters)"
+      ]
+    },
+    {
+      "id": "cadence-cluster",
+      "prompt": "this sounds like a chatgpt linkedin post — can you de-AI it?\n\nMost people kill houseplants the same way.\n\nThey overwater. They underwater. They move the pot every week chasing the perfect light.\n\nHere's the thing: plants don't want perfect. They want predictable.\n\nThe fiddle-leaf in the dim corner that gets watered every Sunday outlives the one rotated daily under a grow lamp. The pothos on the bookshelf that nobody fusses over outgrows the one in the kitchen window. The succulent ignored for two weeks beats the one prodded for moisture every morning.\n\n\"But what about light? What about humidity?\"\n\nLight and humidity matter. Consistency matters more.\n\nWhat's one plant you've been micro-managing? 🌿",
+      "expected_output": "The agent recognises the cadence cluster: one-sentence paragraphs, 'Here's the thing:' pivot, parallel-sentence tricolon, fake interlocutor in scare quotes, antithesis ('matter. Y matters more'), rhetorical-question + emoji closer. The inventory flags this at the paragraph/post level with category 'cadence' (in addition to per-line tells). The rewrite collapses the post into one or two normal paragraphs preserving the actual claim (consistency beats optimisation for houseplants).",
+      "files": [],
+      "assertions": [
+        "The inventory uses the 'cadence' category at least once",
+        "The inventory flags the one-sentence-paragraph rhythm as a tell (e.g., 'P1-P7 · cadence · N of 7 one-sentence paragraphs')",
+        "The inventory flags 'Here's the thing:' as a cadence cue (pivot phrase)",
+        "The inventory flags the rhetorical-question + emoji closer as a cadence cue",
+        "The inventory flags the parallel-sentence triple ('The fiddle-leaf… The pothos… The succulent…') as a tricolon",
+        "The inventory flags the fake interlocutor ('But what about light? What about humidity?') as a cadence cue",
+        "The rewrite is at most 3 paragraphs and at most ~30% of the original word count",
+        "The rewrite preserves the underlying claim (consistency beats optimisation for houseplants)",
+        "The rewrite does not include the 🌿 emoji or a rhetorical question",
+        "The rewrite does not introduce new plant species or claims absent from the original"
       ]
     },
     {
@@ -28,12 +63,12 @@
     {
       "id": "non-english-structural",
       "prompt": "Możesz to ungptize? Brzmi jak ChatGPT:\n\nTo nie tylko narzędzie, to doświadczenie. Solidne, niezawodne, dopracowane — fundament nowoczesnego rozwoju oprogramowania.",
-      "expected_output": "The agent recognizes the input as Polish, skips scripts/scan.py (English-only lexicon), applies the structural rules from SKILL.md using its own knowledge of Polish — flags the negative parallelism ('to nie tylko X, to Y'), the tricolon of decorative adjectives ('solidne, niezawodne, dopracowane'), and the em-dash construction. Produces a rewrite in Polish, plus a change log noting that the lexical scan was skipped because the input is not English.",
+      "expected_output": "The agent recognizes the input as Polish, skips scripts/scan.py (English-only), and the detector subagent (or main agent) applies the structural rules from SKILL.md using its own knowledge of Polish — flags the negative parallelism ('to nie tylko X, to Y'), the tricolon ('solidne, niezawodne, dopracowane'), and the em-dash construction. Produces a rewrite in Polish, plus a change log noting that the lexical scan was skipped because the input is not English.",
       "files": [],
       "assertions": [
         "The response contains a rewritten version of the input in Polish",
         "The response notes that the lexical scan was skipped (input is not English) — phrasing like 'lexical scan: skipped' or 'skipped, input is Polish' is present",
-        "The change log identifies at least one of: negative-parallelism, tricolon, em-dash flooding",
+        "The inventory or change log identifies at least one of: negative-parallelism, tricolon, em-dash flooding",
         "The agent does not pattern-match the English vocabulary list against the Polish input",
         "The rewrite preserves the underlying factual content (a tool / foundation / for software development)"
       ]

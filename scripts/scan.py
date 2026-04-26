@@ -1,12 +1,29 @@
 #!/usr/bin/env python3
-"""Scan English prose for AI-writing tells catalogued in Wikipedia's
-"Signs of AI writing" article. Emits a JSON report.
+"""Mechanical fact sheet for English prose suspected of being AI-shaped.
+
+What the script does well (and only this):
+- Counts literal hits of the AI-overused vocabulary list (whole-word, case-
+  insensitive). Useful as a vocabulary census, not a verdict.
+- Counts em dashes and reports per-paragraph density. Em-dash flooding is
+  one of the few AI tells that's genuinely a count phenomenon.
+- Counts curly vs. straight quotes so the agent can spot a mismatched
+  convention.
+- Reports paragraph and line stats so the agent can see cadence at a glance
+  (e.g., one-sentence paragraphs is a LinkedIn-AI tell).
+
+What the script intentionally does NOT do:
+- It does not try to detect negative parallelism, antithesis, copulative
+  avoidance, tricolons, elegant variation, or "cadence" tells via regex.
+  Those are recognition tasks, and the agent reading the prose is the right
+  detector. Earlier versions had regex matchers for them; they produced
+  false confidence on miss-prone shapes (e.g., "isn't X — it's Y") and over-
+  fired on legitimate antithesis. The structural pass belongs in SKILL.md.
+
+English-only. The vocabulary list is English; for non-English prose, skip
+this script and apply the categories from SKILL.md using the input
+language directly.
 
 Non-interactive: reads from --file PATH or stdin, writes JSON to stdout.
-
-English-only. The lexicon and most regexes are English-specific; for
-non-English prose, skip this script and apply the rule categories from
-SKILL.md using your knowledge of the input language.
 """
 
 from __future__ import annotations
@@ -19,7 +36,7 @@ from collections import Counter
 from typing import Any
 
 
-# The 24+ words Wikipedia identifies as overused in AI English prose.
+# Words Wikipedia identifies as overused in AI English prose.
 # Stored lowercase; matched as whole words, case-insensitive.
 AI_VOCAB = [
     "additionally",
@@ -53,65 +70,49 @@ AI_VOCAB = [
     "vibrant",
 ]
 
-# Phrases that substitute for "is/are/has" — naive, line-level flags.
-COPULATIVE_AVOIDANCE = [
-    r"\bserves as\b",
-    r"\bstands as\b",
-    r"\brepresents\b",
-    r"\bboasts\b",
-    r"\bfeatures\b",
-    r"\bmaintains\b",
-    r"\boffers\b",
-    r"\bmarks\b",
-]
-
-# Decorative negative-parallelism shapes.
-NEG_PARALLELISM = [
-    r"\bnot only\b[^.]*\bbut\b",
-    r"\bnot just\b[^.]*\b(it'?s|its|but)\b",
-    r"\bno\s+\w+,\s*no\s+\w+,\s*just\b",
-]
-
-EM_DASH_PATTERN = re.compile(r"[—–]")  # em + en dash
+EM_DASH_PATTERN = re.compile(r"[—–]")
 CURLY_QUOTE_PATTERN = re.compile(r"[‘’“”]")
 WORD_PATTERN = re.compile(r"\b[A-Za-z'-]+\b")
+SENTENCE_END = re.compile(r"[.!?]+(\s|$)")
+
+
+def split_paragraphs(text: str) -> list[str]:
+    """Split on blank lines. Trim each paragraph."""
+    return [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
 
 def scan(text: str) -> dict[str, Any]:
     lower = text.lower()
 
-    # Vocabulary hits.
     word_counts: Counter[str] = Counter()
     for match in WORD_PATTERN.finditer(lower):
         word = match.group(0)
         if word in AI_VOCAB:
             word_counts[word] += 1
 
-    # Per-line line-numbered findings, useful for the change log.
-    findings: list[dict[str, Any]] = []
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        line_lower = line.lower()
-        for pattern in COPULATIVE_AVOIDANCE:
-            for m in re.finditer(pattern, line_lower):
-                findings.append({
-                    "category": "copulative-avoidance",
-                    "line": lineno,
-                    "match": line[m.start():m.end()],
-                })
-        for pattern in NEG_PARALLELISM:
-            for m in re.finditer(pattern, line_lower):
-                findings.append({
-                    "category": "negative-parallelism",
-                    "line": lineno,
-                    "match": line[m.start():m.end()],
-                })
+    paragraphs = split_paragraphs(text)
+    paragraph_stats = []
+    for idx, para in enumerate(paragraphs, start=1):
+        em = len(EM_DASH_PATTERN.findall(para))
+        sentences = max(1, len(SENTENCE_END.findall(para)))
+        words = len(WORD_PATTERN.findall(para))
+        paragraph_stats.append({
+            "paragraph": idx,
+            "sentences": sentences,
+            "words": words,
+            "em_dashes": em,
+        })
 
     em_dashes = len(EM_DASH_PATTERN.findall(text))
     curly_quotes = len(CURLY_QUOTE_PATTERN.findall(text))
 
-    # Cluster heuristic: how many distinct vocab words appeared at least once.
     distinct_vocab = len(word_counts)
     total_vocab_hits = sum(word_counts.values())
+    total_words = len(WORD_PATTERN.findall(text))
+
+    one_sentence_paragraphs = sum(
+        1 for p in paragraph_stats if p["sentences"] == 1
+    )
 
     return {
         "vocabulary": {
@@ -119,27 +120,32 @@ def scan(text: str) -> dict[str, Any]:
             "distinct_words": distinct_vocab,
             "total_hits": total_vocab_hits,
         },
-        "structural_findings": findings,
         "punctuation": {
             "em_dashes": em_dashes,
             "curly_quotes": curly_quotes,
         },
-        "cluster_signal": {
-            "distinct_vocab_words": distinct_vocab,
-            "structural_finding_count": len(findings),
-            "note": (
-                "Multiple categories with hits = stronger AI-writing signal. "
-                "Single isolated hits are usually not tells."
-            ),
+        "structure": {
+            "paragraphs": len(paragraphs),
+            "total_words": total_words,
+            "one_sentence_paragraphs": one_sentence_paragraphs,
+            "per_paragraph": paragraph_stats,
         },
+        "note": (
+            "This is a fact sheet, not a verdict. Structural patterns "
+            "(negative parallelism, tricolons, elegant variation, "
+            "copulative avoidance, cadence) are detected by the agent "
+            "reading the prose, not by this script. Use the inventory "
+            "phase in SKILL.md to enumerate them."
+        ),
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Scan English prose for AI-writing tells. Emits JSON. "
-            "Reads from --file PATH or stdin."
+            "Mechanical fact sheet for English prose. Reports vocabulary "
+            "hits, em-dash and curly-quote counts, and paragraph stats. "
+            "Reads from --file PATH or stdin. Emits JSON."
         )
     )
     parser.add_argument(

@@ -1,6 +1,6 @@
 ---
 name: ungptize
-description: Use this skill when the user wants to strip AI-writing tells from prose — triggers include "ungptize", "remove AI tells", "make this less ChatGPT-y", "de-AI this", "this sounds like AI / GPT / an LLM", "rewrite to sound human", "scrub the GPT-isms", "less corporate", "too polished", or simply pasting prose and asking for a more human voice. Detects and rewrites the patterns Wikipedia catalogues as signs of AI writing — overused vocabulary (delve, pivotal, tapestry, robust, vibrant, etc.), avoidance of basic copulatives ("serves as" / "stands as" replacing "is" or "has"), negative parallelisms ("not just X, but Y"), rule-of-three tricolons, elegant variation, em-dash flooding, curly-quote conventions. English-first with multilingual structural fallback — also trigger when the input is in another language and the user asks for the same kind of cleanup, even if they don't say "AI".
+description: Use this skill when the user wants to strip AI-writing tells from prose — triggers include "ungptize", "remove AI tells", "make this less ChatGPT-y", "de-AI this", "this sounds like AI / GPT / an LLM", "rewrite to sound human", "scrub the GPT-isms", "less corporate", "too polished", or simply pasting prose and asking for a more human voice. Detects and rewrites the patterns Wikipedia catalogues as signs of AI writing — overused vocabulary (delve, pivotal, tapestry, robust, vibrant, etc.), avoidance of basic copulatives ("serves as" / "stands as" replacing "is" or "has"), negative parallelisms ("not just X, but Y"), rule-of-three tricolons, elegant variation, em-dash flooding, curly-quote conventions — plus the LinkedIn-style cadence (one-sentence paragraphs, fake interlocutor, aphorism drops, rhetorical-question + emoji closers) that Wikipedia's catalogue misses. English-first with multilingual structural fallback — also trigger when the input is in another language and the user asks for the same kind of cleanup, even if they don't say "AI".
 metadata:
   cooked-with: johnslavik/skillcook
   cooked-with-version: "85270c7"
@@ -8,96 +8,240 @@ metadata:
 
 # ungptize
 
-Take prose the user suspects is AI-shaped and rewrite it to remove the linguistic tells while preserving meaning, voice, and register. Source: the *Language and grammar* section of Wikipedia's [*Signs of AI writing*](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing) (plus the punctuation tells from the adjacent *Style* section).
+Take prose the user suspects is AI-shaped and rewrite it to remove the linguistic tells while preserving meaning, voice, and register.
+
+Source: the *Language and grammar* and *Style* sections of Wikipedia's [*Signs of AI writing*](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing), plus the cadence tells that LinkedIn-style AI prose is built on (which Wikipedia doesn't cover but every model trained on the open web reproduces).
+
+## How this skill works: two phases
+
+**Phase 1 — Inventory (find everything).** A detector subagent reads the prose and produces an exhaustive inventory of every candidate smell. The subagent has no rewrite tools; its only job is enumeration.
+
+**Phase 2 — Rewrite (act on the inventory).** The main agent rewrites only the rows the inventory flagged `rewrite`. The change log is the inventory, filtered.
+
+Why two phases, and why a subagent for phase 1: when detection and rewriting happen in the same context, the agent skims, fixes obvious tells, and stops. Splitting detection into a separate subagent forces enumeration before action — and because the subagent literally can't rewrite, the phase boundary is enforced by tool access, not just discipline.
+
+## Why the agent is the detector, not regex
+
+Earlier versions of this skill tried to detect structural tells (negative parallelism, antithesis, copulative avoidance) with regex in `scripts/scan.py`. That was the wrong layer. Each pattern has too many surface forms — "not X, but Y" / "isn't X — it's Y" / "wasn't X; it was Y" / "X, not Y" / "no X, no Y, just Z" — and the verdict ("decorative or genuine contrast?") is semantic, not lexical.
+
+The right detector is a language model reading the prose. The recognition happens by *seeing* the shape, not by matching a regex. The script's job is now narrow and honest: vocabulary census, em-dash count, curly-quote count, paragraph stats. The structural and cadence pass belongs to the subagent.
 
 ## Workflow
 
-- [ ] **1. Read the input.** Identify the language. If non-English, set the `LEX_AVAILABLE=false` flag for yourself and skip step 2.
-- [ ] **2. Run `scripts/scan.py`** on the input (English only). Pipe the prose to stdin; read the JSON report. Use it to back the change log with line numbers, not to dictate every fix.
-- [ ] **3. Categorise candidate tells** into the five categories below + punctuation. For non-English input, do this from your own knowledge of the language's idiomatic AI-shaped phrasings — the categories generalise; the lexicon does not.
-- [ ] **4. Decide what to rewrite.** Apply the clustering rule: rewrite when tells cluster or when a phrase clearly leans on a pattern. Leave isolated, neutrally-used instances alone.
-- [ ] **5. Rewrite.** Preserve meaning, voice, register. Prefer the simplest copulative ("is"/"has") to a fancier verb. Don't invent content to fill gaps.
+- [ ] **1. Read the input.** Identify the language. If non-English, set `LEX_AVAILABLE=false` and skip step 2.
+- [ ] **2. Run `scripts/scan.py`** on the input (English only). Pipe the prose to stdin; read the JSON fact sheet (vocabulary hits, em-dash count, paragraph stats).
+- [ ] **3. Phase 1: spawn a detector subagent.** Use the `general-purpose` subagent. Give it: the prose, the fact sheet, the pattern catalog from this file, and the inventory format. Instruct it to produce the full inventory and return only that — no rewrite, no commentary. See "Detector subagent prompt" below.
+- [ ] **4. Apply the clustering rule** to the returned inventory. Single neutral hits get `keep`. Decorative or clustered hits get `rewrite`. Genuine semantic contrasts get `keep`.
+- [ ] **5. Phase 2: rewrite.** Act only on `rewrite` rows. Preserve meaning, voice, register. Prefer the simplest copulative ("is"/"has"). Don't invent content to fill gaps.
 - [ ] **6. Verify** that meaning is preserved and the rewrite reads in the user's voice (or in a neutral human voice if the user is anonymous).
-- [ ] **7. Output** the rewritten prose followed by a tell-by-tell change log.
+- [ ] **7. Output** the inventory, then the rewritten prose, then a brief change log (inventory filtered to `rewrite` rows).
+
+## Inventory format
+
+One row per finding. Fixed shape, scannable:
+
+```
+L<line> · <category> · "<exact phrase>" · <verdict> · <one-line why>
+```
+
+- `<category>` ∈ `vocab`, `copulative`, `neg-parallel`, `tricolon`, `elegant-var`, `cadence`, `em-dash`, `curly-quote`
+- `<verdict>` ∈ `rewrite`, `keep`, `borderline`
+- `<one-line why>` — terse justification, no hedging
+
+Example rows:
+
+```
+L1  · vocab        · "pivotal"                                              · rewrite   · decorative, no work being done
+L7  · neg-parallel · "isn't that the AI is 'smart' — it's that maintainer…" · rewrite   · decorative antithesis, no real contrast
+L9  · neg-parallel · "the fix is a rule, not a patch"                       · rewrite   · `X, not Y` decorative form
+L12 · tricolon     · "better, faster, and more honest"                      · rewrite   · adj triple, "faster" carries no weight
+L14 · vocab        · "key insight"                                          · keep      · single neutral usage, doing real work
+L18 · em-dash      · 10 dashes across 850 words                             · rewrite   · flooding, ~1 per 85 words
+P1-P8 · cadence    · 6 of 8 paragraphs are one sentence                     · rewrite   · LinkedIn AI cadence
+```
+
+`L<n>` for line-anchored findings; `P<n>` for paragraph-level (cadence, structural). Walk the prose end-to-end before writing the inventory. **If the inventory is incomplete, the rewrite will be incomplete.**
+
+## Detector subagent prompt
+
+When spawning the phase-1 subagent (`general-purpose`), use a prompt of this shape:
+
+> You are the detector phase of the ungptize skill. Your only job is to read the prose below and produce an exhaustive inventory of AI-writing tells in the format specified. Do not rewrite. Do not summarise. Do not skip sentences. Walk the prose end-to-end.
+>
+> Pattern catalog: <paste the "What to flag" section from SKILL.md>
+> Inventory format: <paste the "Inventory format" section from SKILL.md>
+> Mechanical fact sheet: <paste the JSON output of scripts/scan.py>
+> Prose to analyse: <paste the user's prose, line-numbered>
+>
+> Return only the inventory. One row per candidate. Mark each row `rewrite`, `keep`, or `borderline` with a one-line justification.
+
+The subagent's exhaustiveness is the whole point. It has no rewrite tools, so the only thing it can do is detect.
+
+## What to flag (the recognition cues)
+
+Each category, with what to look for. These are recognition cues for a reader, not regex shapes for a parser. The detector subagent reads the prose with these in mind.
+
+### vocab
+
+Words from `references/VOCABULARY.md` (delve, pivotal, tapestry, robust, vibrant, intricate, meticulous, crucial, key, fostering, enhance, align with, showcase, underscore, testament, etc.).
+
+- ❌ "This **pivotal** release **boasts** a **vibrant tapestry** of features."
+- ✅ "This release adds the features below."
+- *Verdict rule:* flag every hit. `keep` for single neutral uses; `rewrite` for clusters or decorative singletons.
+
+### copulative
+
+Substitutes for `is/are/has`: `serves as`, `stands as`, `marks`, `represents`, `boasts`, `features`, `maintains`, `offers`.
+
+- ❌ "The library **serves as** the foundation of the framework."
+- ✅ "The library **is** the foundation of the framework."
+- *Verdict rule:* almost always `rewrite`. `keep` only when the verb does genuine semantic work ("the committee serves as the appellate body" — describes a role, not identity).
+
+### neg-parallel
+
+The decorative-antithesis family. **The most miss-prone category.** When reading, scan every sentence for any of these shapes:
+
+| Shape | Example |
+|-------|---------|
+| `not only X, but Y` | "not only fast, but also memory-safe" |
+| `not just X, it's Y` | "not just a tool, it's an experience" |
+| `not X, but Y` | "not a bug, but a feature" |
+| `X, not Y` | "the fix is a rule, **not a patch**" |
+| `isn't/wasn't X — it's/it was Y` | "**isn't that the AI is smart — it's that** maintainer knowledge…" |
+| `isn't X; it's Y` | "**doesn't need a script; it needs guidance**" |
+| `wasn't X; it was Y` | "**wasn't a new library; it was two paragraphs**" |
+| `X is A; Y is B` antithesis | "A script is a leaky abstraction; a skill file is the actual intent" |
+| `Don't X. Y instead.` | "**Don't write a script. Write a set of instructions.**" |
+| `no X, no Y, just Z` | "no fluff, no jargon, just clarity" |
+| `doesn't mean X. It means Y.` | "this **doesn't mean I don't care about quality. It means I care more about speed**" |
+
+- *Verdict rule:* flag every shape. `rewrite` when the contrast is decorative (no real semantic content in the negation). `keep` when the contrast carries actual meaning ("she wasn't the candidate I expected, but the candidate I needed").
+
+### tricolon
+
+Adj/adj/adj or phrase/phrase/and-phrase rule-of-three. Also parallel-sentence triples ("X that Y… X that Y… X that Y…") which are the LinkedIn long-form version.
+
+- ❌ "a **meticulous, robust, intricate** experience"
+- ❌ "**The runner who shows up tired** beats the one who waits for ideal weather. **The recipe you cook tonight** beats the one you bookmark for next month. **The page you write at lunch** beats the chapter you outline forever."
+- ✅ "a careful experience"
+- *Verdict rule:* `rewrite` when decorative. `keep` for established rhetoric ("life, liberty, and the pursuit of happiness"), real lists of three things ("lexer, parser, and codegen"), and prose where the triple actually rhymes with surrounding rhythm.
+
+### elegant-var
+
+Renaming the subject instead of repeating the noun.
+
+- ❌ "Linus created Linux. **The eponymous developer** also wrote git."
+- ✅ "Linus created Linux. He also wrote git."
+- *Verdict rule:* `rewrite` when ornamental. `keep` when the variation adds context ("the Finnish-American engineer was 21 at the time").
+
+### cadence
+
+Not in Wikipedia's catalogue but a high-signal AI tell, especially for LinkedIn-style and "thought-leader" prose. Look for these together:
+
+- **One-sentence paragraphs.** Most or every paragraph is a single sentence with whitespace between. The fact sheet reports the count.
+- **Pivot phrases.** "Here's the thing:" / "Let me explain:" / "But here's what I've learned:" introducing a reframe.
+- **Fake interlocutor.** "I know what you're thinking — *X*?" or "You might be wondering…" inserting a quoted objection that the writer then refutes.
+- **Fragment-as-emphasis.** A standalone fragment functioning as a punchline. "Especially now." / "Every time."
+- **Aphorism drop.** A maxim sentence that summarises the post in a tweet-ready line. "Comfort is the enemy of growth."
+- **Rhetorical-question + emoji closer.** Final paragraph asks the reader a question, often followed by an emoji.
+
+- ❌ (cadence cluster):
+  > Most people learn languages the wrong way.
+  >
+  > They drill flashcards. They memorise verb tables. They wait until they feel "ready" to speak.
+  >
+  > Here's the thing: ready never comes.
+  >
+  > The student who babbles broken sentences with a stranger on day three beats the one who nails grammar drills for a year. The traveller who orders coffee in fragments beats the one rehearsing in their head.
+  >
+  > "But what about accuracy?"
+  >
+  > Accuracy follows fluency. Not the other way around.
+  >
+  > What's one phrase you've been afraid to try out loud? 👀
+
+- ✅ Rewrite: condense to a normal paragraph. Drop the pivot phrase, the fake interlocutor, the rhetorical-question closer, the emoji. Merge the parallel triple into one sentence or pick the strongest example.
+
+- *Verdict rule:* a single one-sentence paragraph is not a cadence tell. The cluster is. If three or more cadence cues appear together (e.g., one-sentence paragraphs + pivot phrase + parallel triple + rhetorical-question closer), flag the whole post `rewrite` at paragraph level (`P1-Pn · cadence · …`).
+
+### em-dash
+
+Em-dash flooding. The tell is *count*, not the dash itself.
+
+- *Verdict rule:* count em dashes per paragraph. Two or three across a long paragraph is normal. Five-plus in a paragraph, or one in nearly every sentence, is `rewrite`. See `references/PUNCTUATION.md` for rewrite options.
+
+### curly-quote
+
+Curly quotes (`" " ' '`) where the surrounding document uses straight quotes (or vice versa).
+
+- *Verdict rule:* `rewrite` only if it conflicts with the user's existing convention. `keep` if the document is print/ebook/CMS that prefers curly. Don't silently flip a convention the user picked.
 
 ## Inputs
 
-The user pastes prose. They may also specify aggressiveness ("light pass", "scrub it hard"). Default: conservative — fix clusters, leave isolated-and-neutral instances.
+The user pastes prose. They may also specify aggressiveness ("light pass", "scrub it hard"). Default: conservative — `rewrite` for clusters and decorative cases, `keep` for isolated-and-neutral instances.
 
 If the input is a fragment without context (e.g., one sentence with no surrounding paragraph), ask whether to assume formal or casual register before rewriting. Don't guess silently.
 
 Do **not** invent: project-specific terminology, names, facts, or claims to "replace" content removed during de-tell-ing. If removing a tell leaves the sentence shorter, that's fine.
 
-## The five language-and-grammar patterns
-
-Each rule: what to look for, then a one-line before/after.
-
-**1. High-density AI vocabulary.** Words like *delve, pivotal, tapestry, robust, vibrant, intricate, meticulous, crucial, key, fostering, enhance, align with, showcase, underscore, testament, garner, bolstered, landscape, interplay, enduring, additionally, boasts, valuable, highlight, emphasizing*. Rewrite when several appear together or when one clearly carries no weight. Full list with replacements + era timeline: `references/VOCABULARY.md`.
-- *Before:* "This pivotal release boasts a vibrant tapestry of features."
-- *After:* "This release adds the features listed below."
-
-**2. Avoidance of basic copulatives.** *Serves as, stands as, marks, represents, boasts, features, maintains, offers* in place of *is/are/has*.
-- *Before:* "The library serves as the foundation of the framework."
-- *After:* "The library is the foundation of the framework."
-
-**3. Negative parallelisms.** *Not only X, but Y* / *Not just X, it's Y* / *Not X, but Y* / *No X, no Y, just Z*. Tell when the form is decorative; legitimate when the contrast carries actual meaning.
-- *Before:* "It's not just a tool, it's an experience."
-- *After:* "It's a good tool." (or whatever is actually true)
-
-**4. Rule of three.** Adj/adj/adj or phrase/phrase/and-phrase tricolons. Tell when decorative and unsupported by surrounding rhythm; legitimate in slogans, quoted speech, and rhetorically grounded prose.
-- *Before:* "a meticulous, robust, intricate experience"
-- *After:* "a careful experience" (pick the one adjective that's actually doing work)
-
-**5. Elegant variation.** Renaming the subject ("the protagonist", "the eponymous character", "the key player") instead of repeating the noun. Repeat the noun unless variation genuinely clarifies.
-- *Before:* "Linus created Linux. The eponymous creator…"
-- *After:* "Linus created Linux. Linus then…"
-
-**6. Punctuation tells** (covered in `references/PUNCTUATION.md`). Em-dash flooding and curly quotes substituted into prose where straight quotes are the local default.
-
 ## Defaults
 
 - **Voice preservation:** match the surrounding text's register. If the input is the user's own writing, lean toward less rather than more change.
-- **Conservative pass:** rewrite clusters and decorative cases; leave isolated neutral usages.
+- **Conservative pass:** `rewrite` clusters and decorative cases; `keep` isolated neutral usages.
 - **No filler invention:** if a sentence gets shorter, leave it shorter.
-- **Show your work:** every rewrite appears in the change log with its category and the original phrasing.
+- **Show your work:** the inventory and the change log are the same data, just filtered. Every rewrite traces back to a row.
+- **Escape the shape, don't compress it.** When rewriting an antithesis (`X, not Y` / `not X, but Y` / `wasn't X — it was Y` / `doesn't mean X. It means Y.`), do not merely shorten it into a tighter antithesis. State the affirmative half directly and drop the negation. If you can't restate the thought without the antithesis structure, the antithesis was carrying the meaning — and that's still the AI shape. Find a different sentence that just says what's true. The same applies to parallel-clause `X is A; Y is B` — pick one, drop the other, or rewrite as plain prose without the semicolon parallel.
 
 ## Gotchas
 
-- **Don't strip every flagged word.** *Key, crucial, additionally* appear in legitimate prose. Wikipedia explicitly notes that clustering — not single tokens — is the AI signal. Single neutral hits stay.
+- **Don't strip every flagged word.** *Key, crucial, additionally* appear in legitimate prose. Wikipedia explicitly notes that clustering — not single tokens — is the AI signal. Single neutral hits stay (`keep`).
 - **Don't invent content to fill the gap.** Removing "serves as the foundation of modern X" yields "is the foundation of modern X" — not a longer rewrite that reintroduces filler.
 - **Preserve voice.** A rewrite that sounds like a different LLM's house style is still a tell, just a different one. Match the user's register.
 - **Tricolons aren't always AI.** Quoted speech, slogans, established rhetoric ("life, liberty, and the pursuit of happiness") use the rule of three for a reason. Flag only decorative ones.
-- **Negative parallelism has legitimate uses.** "Not the man we knew, but the man he had become" is prose. The tell is the shallow decorative form ("not just a tool, it's an experience").
-- **Em dashes are not banned.** A few em dashes are normal. The tell is *flooding* — many per paragraph for over-emphasis. The script reports counts so you can decide.
-- **Curly quotes can be intentional.** Print, ebook, and some CMS pipelines want curly quotes. Convert only if the surrounding document uses straight quotes (or vice versa); never silently flip a convention the user picked.
-- **Non-English input: lexicon is unavailable, categories still apply.** Skip `scripts/scan.py`. Don't translate the English vocabulary list into the target language and pattern-match — invent nothing the source doesn't cover. Apply categories (negative parallelism, rule of three, elegant variation, copulative avoidance, em-dash flooding) using your own knowledge of the language. Note in the change log that the lexical scan was skipped.
-- **The script is a pointer, not a verdict.** `scripts/scan.py` flags candidates; you decide. A high "key" count with all uses being neutral means no rewrite.
+- **Negative parallelism has legitimate uses.** "Not the man we knew, but the man he had become" is prose. The tell is the shallow decorative form.
+- **Em dashes are not banned.** A few em dashes are normal. The tell is *flooding*. The script reports counts so you can decide.
+- **Curly quotes can be intentional.** Print, ebook, and some CMS pipelines want curly quotes. Convert only if the surrounding document uses straight quotes (or vice versa).
+- **One-sentence paragraphs aren't always AI.** A single short paragraph for emphasis is a normal rhetorical move. The cadence tell is the pattern across the whole post (most paragraphs short, plus pivot phrases, plus rhetorical-question closer).
+- **Non-English input: lexicon is unavailable, categories still apply.** Skip `scripts/scan.py`. Don't translate the English vocabulary list into the target language and pattern-match — invent nothing the source doesn't cover. The detector subagent applies categories using its own knowledge of the language. Note in the change log that the lexical scan was skipped.
+- **The script is a fact sheet, not a verdict.** It counts; the agent decides.
 - **Don't sanitise the user's intentional voice.** If a sentence is florid because the user *wants* it florid, leave it. Ask if unsure.
 
 ## References
 
-- **`references/VOCABULARY.md`** — read when you need a neutral replacement for a flagged word, or when the script reports a word you don't immediately recognise as a tell. Includes the era timeline (which words dominated 2023→mid-2024 vs. mid-2024→mid-2025 vs. mid-2025→).
-- **`references/EXAMPLES.md`** — read when you're unsure whether a candidate is actually a tell vs. legitimate prose. Extended before/after rewrites for each category, including ambiguous cases.
-- **`references/PUNCTUATION.md`** — read when the input has noticeable em-dash density or mixed quote styles, or when the user explicitly asks about punctuation.
+- **`references/VOCABULARY.md`** — neutral replacements for flagged words plus the era timeline (which words dominated 2023→mid-2024 vs. mid-2024→mid-2025 vs. mid-2025→).
+- **`references/EXAMPLES.md`** — extended before/after rewrites for each category, plus worked-example inventories on long-form prose.
+- **`references/PUNCTUATION.md`** — em dashes and curly quotes in detail.
 
 ## Available scripts
 
-- **`scripts/scan.py`** — English-only mechanical scan. Pipe prose to stdin (or pass `--file PATH`); receive a JSON report with vocabulary hits, em-dash count, curly-quote count, candidate negative-parallelism matches, and copulative-avoidance flags. Run with `--help` for usage. For non-English input, skip this script — its lexicon is English-only and it will exit with a clear message if given `--language` other than `en`.
+- **`scripts/scan.py`** — English-only mechanical fact sheet. Pipe the prose to stdin (or pass `--file PATH`); receive a JSON report with vocabulary hits, em-dash count, curly-quote count, and per-paragraph stats. Run with `--help` for usage. Reports facts only — does not classify structural tells. For non-English input, skip this script.
 
 ## Output
 
-A rewritten copy of the prose, followed by a brief change log. Format:
+Inventory, then rewritten prose, then change log. Format:
 
 ```
+## Inventory
+
+L1  · vocab        · "pivotal"                          · rewrite   · decorative
+L1  · copulative   · "boasts"                           · rewrite   · stock "has" substitute
+L7  · neg-parallel · "isn't X — it's Y"                 · rewrite   · decorative antithesis
+L14 · vocab        · "key insight"                      · keep      · single neutral, doing work
+L18 · em-dash      · 10 dashes across 850 words         · rewrite   · flooding
+P1-P8 · cadence    · 6 of 8 one-sentence paragraphs     · rewrite   · LinkedIn cadence cluster
+[... every candidate, no skipping ...]
+
+## Rewrite
+
 <rewritten prose>
 
----
-Changes:
-- [vocabulary] "pivotal" → removed (decorative)
-- [copulative] "serves as" → "is"
-- [negative-parallelism] "not just X, but Y" → "X" (decorative form)
-- [tricolon] "meticulous, robust, intricate" → "careful" (decorative)
-- [punctuation] 7 em dashes → 2 (flooding)
+## Changes (inventory filtered to `rewrite`)
+
+- [vocab] L1 "pivotal" → removed
+- [copulative] L1 "boasts" → "has"
+- [neg-parallel] L7 "isn't X — it's Y" → split into two sentences
+- [em-dash] L18 10 dashes → 4
+- [cadence] P1-P8 → consolidated into 3 normal paragraphs
 
 Lexical scan: <ran on English | skipped, input is <language>>
 ```
