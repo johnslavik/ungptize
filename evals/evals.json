@@ -1,0 +1,42 @@
+{
+  "skill_name": "ungptize",
+  "evals": [
+    {
+      "id": "happy-path-english",
+      "prompt": "ungptize this for me:\n\nThis pivotal release boasts a vibrant tapestry of features, fostering not just productivity, but a meticulous, robust, intricate experience. The library serves as a key showcase of our work — and stands as a testament to the team's enduring commitment.",
+      "expected_output": "The agent runs scripts/scan.py on the input, identifies hits across multiple categories (vocabulary cluster, copulative avoidance, negative parallelism, tricolon), produces a substantially shorter rewrite that preserves the factual claims (a release with features; a library), and returns a tell-by-tell change log naming each category and the original phrasing.",
+      "files": [],
+      "assertions": [
+        "The response contains a rewritten version of the input prose",
+        "The response contains a change log section listing at least three of the categories: vocabulary, copulative-avoidance, negative-parallelism, tricolon",
+        "The rewrite drops or replaces 'pivotal', 'boasts', 'vibrant', 'tapestry', 'fostering', 'meticulous', 'robust', 'intricate', 'serves as', 'stands as', 'testament', 'enduring' (at least 8 of these are gone)",
+        "The rewrite does not invent new factual content not present in the original",
+        "The rewrite is shorter than the original by character count"
+      ]
+    },
+    {
+      "id": "near-miss-negative",
+      "prompt": "Can you tighten this paragraph? I think it's a bit wordy.\n\nThe key insight in our analysis is that recursion bottoms out at the base case, and that the algorithm runs in O(n log n) time on average inputs.",
+      "expected_output": "The agent tightens the paragraph as requested, but does NOT activate the full ungptize procedure. 'Key' here is a single neutral usage doing real work; no clustering. The agent should not produce an AI-tell change log or scrub vocabulary that's pulling its weight.",
+      "files": [],
+      "assertions": [
+        "The agent does not produce an AI-tell change log for this input",
+        "The word 'key' is preserved in the output (or replaced only as part of general tightening, not flagged as an AI tell)",
+        "No mention of categories like 'copulative-avoidance' or 'negative-parallelism' appears in the response"
+      ]
+    },
+    {
+      "id": "non-english-structural",
+      "prompt": "Możesz to ungptize? Brzmi jak ChatGPT:\n\nTo nie tylko narzędzie, to doświadczenie. Solidne, niezawodne, dopracowane — fundament nowoczesnego rozwoju oprogramowania.",
+      "expected_output": "The agent recognizes the input as Polish, skips scripts/scan.py (English-only lexicon), applies the structural rules from SKILL.md using its own knowledge of Polish — flags the negative parallelism ('to nie tylko X, to Y'), the tricolon of decorative adjectives ('solidne, niezawodne, dopracowane'), and the em-dash construction. Produces a rewrite in Polish, plus a change log noting that the lexical scan was skipped because the input is not English.",
+      "files": [],
+      "assertions": [
+        "The response contains a rewritten version of the input in Polish",
+        "The response notes that the lexical scan was skipped (input is not English) — phrasing like 'lexical scan: skipped' or 'skipped, input is Polish' is present",
+        "The change log identifies at least one of: negative-parallelism, tricolon, em-dash flooding",
+        "The agent does not pattern-match the English vocabulary list against the Polish input",
+        "The rewrite preserves the underlying factual content (a tool / foundation / for software development)"
+      ]
+    }
+  ]
+}
