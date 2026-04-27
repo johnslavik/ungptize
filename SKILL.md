@@ -1,6 +1,6 @@
 ---
 name: ungptize
-description: Use this skill when the user wants to strip AI-writing tells from prose — triggers include "ungptize", "remove AI tells", "make this less ChatGPT-y", "de-AI this", "this sounds like AI / GPT / an LLM", "rewrite to sound human", "scrub the GPT-isms", "less corporate", "too polished", or simply pasting prose and asking for a more human voice. Detects and rewrites the patterns Wikipedia catalogues as signs of AI writing — overused vocabulary (delve, pivotal, tapestry, robust, vibrant, etc.), avoidance of basic copulatives ("serves as" / "stands as" replacing "is" or "has"), negative parallelisms ("not just X, but Y"), rule-of-three tricolons, elegant variation, em-dash flooding, curly-quote conventions — plus the LinkedIn-style cadence (one-sentence paragraphs, fake interlocutor, aphorism drops, rhetorical-question + emoji closers) that Wikipedia's catalogue misses. English-first with multilingual structural fallback — also trigger when the input is in another language and the user asks for the same kind of cleanup, even if they don't say "AI".
+description: Use this skill when the user wants to strip AI-writing tells from prose — triggers include "ungptize", "remove AI tells", "make this less ChatGPT-y", "de-AI this", "this sounds like AI / GPT / an LLM", "rewrite to sound human", "scrub the GPT-isms", "less corporate", "too polished", or simply pasting prose and asking for a more human voice. Detects and rewrites the patterns Wikipedia catalogues as signs of AI writing — overused vocabulary (delve, pivotal, tapestry, robust, vibrant, etc.), avoidance of basic copulatives ("serves as" / "stands as" replacing "is" or "has"), negative parallelisms ("not just X, but Y"), rule-of-three tricolons, elegant variation, pre-emptive "What this isn't" / "To be clear:" concession blocks that stack parallel denials, em-dash flooding, curly-quote conventions — plus the LinkedIn-style cadence (one-sentence paragraphs, fake interlocutor, aphorism drops, rhetorical-question + emoji closers) that Wikipedia's catalogue misses. English-first with multilingual structural fallback — also trigger when the input is in another language and the user asks for the same kind of cleanup, even if they don't say "AI".
 metadata:
   cooked-with: johnslavik/skillcook
   cooked-with-version: "85270c7"
@@ -22,19 +22,18 @@ Why two phases, and why a subagent for phase 1: when detection and rewriting hap
 
 ## Why the agent is the detector, not regex
 
-Earlier versions of this skill tried to detect structural tells (negative parallelism, antithesis, copulative avoidance) with regex in `scripts/scan.py`. That was the wrong layer. Each pattern has too many surface forms — "not X, but Y" / "isn't X — it's Y" / "wasn't X; it was Y" / "X, not Y" / "no X, no Y, just Z" — and the verdict ("decorative or genuine contrast?") is semantic, not lexical.
+Earlier versions of this skill tried to detect structural tells (negative parallelism, antithesis, copulative avoidance) with regex. That was the wrong layer. Each pattern has too many surface forms — "not X, but Y" / "isn't X — it's Y" / "wasn't X; it was Y" / "X, not Y" / "no X, no Y, just Z" — and the verdict ("decorative or genuine contrast?") is semantic, not lexical.
 
-The right detector is a language model reading the prose. The recognition happens by *seeing* the shape, not by matching a regex. The script's job is now narrow and honest: vocabulary census, em-dash count, curly-quote count, paragraph stats. The structural and cadence pass belongs to the subagent.
+The right detector is a language model reading the prose. The recognition happens by *seeing* the shape, not by matching a regex. Even mechanical-looking signals (vocabulary density, em-dash count, curly-quote use, one-sentence-paragraph rhythm) are simple enough to count by reading — adding a script for them costs more than it saves, and the temptation to "trust the count" hides cases where the same number means something different in context.
 
 ## Workflow
 
-- [ ] **1. Read the input.** Identify the language. If non-English, set `LEX_AVAILABLE=false` and skip step 2.
-- [ ] **2. Run `scripts/scan.py`** on the input (English only). Pipe the prose to stdin; read the JSON fact sheet (vocabulary hits, em-dash count, paragraph stats).
-- [ ] **3. Phase 1: spawn a detector subagent.** Use the `general-purpose` subagent. Give it: the prose, the fact sheet, the pattern catalog from this file, and the inventory format. Instruct it to produce the full inventory and return only that — no rewrite, no commentary. See "Detector subagent prompt" below.
-- [ ] **4. Apply the clustering rule** to the returned inventory. Single neutral hits get `keep`. Decorative or clustered hits get `rewrite`. Genuine semantic contrasts get `keep`.
-- [ ] **5. Phase 2: rewrite.** Act only on `rewrite` rows. Preserve meaning, voice, register. Prefer the simplest copulative ("is"/"has"). Don't invent content to fill gaps.
-- [ ] **6. Verify** that meaning is preserved and the rewrite reads in the user's voice (or in a neutral human voice if the user is anonymous).
-- [ ] **7. Output** the inventory, then the rewritten prose, then a brief change log (inventory filtered to `rewrite` rows).
+- [ ] **1. Read the input.** Identify the language. Note voice, register, cadence, and the kind of document (essay, post, README, RFC, FAQ) — register decides which patterns are tells vs. legitimate.
+- [ ] **2. Phase 1: spawn a detector subagent.** Use the `general-purpose` subagent. Give it: the prose (line-numbered), the pattern catalog from this file, and the inventory format. Instruct it to produce the full inventory and return only that — no rewrite, no commentary. See "Detector subagent prompt" below.
+- [ ] **3. Apply the clustering rule** to the returned inventory. Single neutral hits get `keep`. Decorative or clustered hits get `rewrite`. Genuine semantic contrasts get `keep`.
+- [ ] **4. Phase 2: rewrite.** Act only on `rewrite` rows. Preserve meaning, voice, register. Prefer the simplest copulative ("is"/"has"). Don't invent content to fill gaps.
+- [ ] **5. Verify** that meaning is preserved and the rewrite reads in the user's voice (or in a neutral human voice if the user is anonymous).
+- [ ] **6. Output** the inventory, then the rewritten prose, then a brief change log (inventory filtered to `rewrite` rows).
 
 ## Inventory format
 
@@ -44,7 +43,7 @@ One row per finding. Fixed shape, scannable:
 L<line> · <category> · "<exact phrase>" · <verdict> · <one-line why>
 ```
 
-- `<category>` ∈ `vocab`, `copulative`, `neg-parallel`, `tricolon`, `elegant-var`, `cadence`, `em-dash`, `curly-quote`
+- `<category>` ∈ `vocab`, `copulative`, `neg-parallel`, `tricolon`, `elegant-var`, `concession-block`, `cadence`, `em-dash`, `curly-quote`
 - `<verdict>` ∈ `rewrite`, `keep`, `borderline`
 - `<one-line why>` — terse justification, no hedging
 
@@ -70,7 +69,6 @@ When spawning the phase-1 subagent (`general-purpose`), use a prompt of this sha
 >
 > Pattern catalog: <paste the "What to flag" section from SKILL.md>
 > Inventory format: <paste the "Inventory format" section from SKILL.md>
-> Mechanical fact sheet: <paste the JSON output of scripts/scan.py>
 > Prose to analyse: <paste the user's prose, line-numbered>
 >
 > Return only the inventory. One row per candidate. Mark each row `rewrite`, `keep`, or `borderline` with a one-line justification.
@@ -134,11 +132,23 @@ Renaming the subject instead of repeating the noun.
 - ✅ "Linus created Linux. He also wrote git."
 - *Verdict rule:* `rewrite` when ornamental. `keep` when the variation adds context ("the Finnish-American engineer was 21 at the time").
 
+### concession-block
+
+Pre-emptive *"What this isn't"*, *"To be clear:"*, *"A few caveats:"*, or *"Some clarifications:"* heading or preamble followed by a numbered/bulleted list of N parallel denials with anaphora — *"It doesn't replace X. … It doesn't replace Y. … It doesn't replace Z."* — often with each item softening into a positive reframe. The structure pre-empts objections the reader hadn't raised. RLHF-trained "balance" scaffolding, the rhetorical equivalent of stapling an FAQ to the end of a personal essay.
+
+The shape, not any one sentence, is the tell. Each item often reads fine alone — read at the section level, not just the sentence level.
+
+- ❌ A bolt-on *"What This Isn't"* / *"To be clear:"* section in a personal essay, blog post, or LinkedIn post, with three or four anaphoric *"It doesn't replace X"* items.
+- ✅ Drop the section. If one item carries a load-bearing point the rest of the piece actually relies on, fold it inline somewhere it does work.
+- *Verdict rule:* `rewrite` when bolted onto an essay, blog post, LinkedIn post, or argument and the objections feel planted by the writer rather than raised by the reader. `keep` when the input is an FAQ, RFC, "Non-goals" section of a design doc, or other genre where readers genuinely arrive with those questions.
+
+**Diagnostic:** is the section *structurally separate* from the argument (heading + list + parallel denials), and would a real reader of this piece actually have raised these objections? If structurally separate AND the objections feel planted: tell. If inline OR the objections are real questions of the genre: leave it.
+
 ### cadence
 
 Not in Wikipedia's catalogue but a high-signal AI tell, especially for LinkedIn-style and "thought-leader" prose. Look for these together:
 
-- **One-sentence paragraphs.** Most or every paragraph is a single sentence with whitespace between. The fact sheet reports the count.
+- **One-sentence paragraphs.** Most or every paragraph is a single sentence with whitespace between. Count by reading.
 - **Pivot phrases.** "Here's the thing:" / "Let me explain:" / "But here's what I've learned:" introducing a reframe.
 - **Fake interlocutor.** "I know what you're thinking — *X*?" or "You might be wondering…" inserting a quoted objection that the writer then refutes.
 - **Fragment-as-emphasis.** A standalone fragment functioning as a punchline. "Especially now." / "Every time."
@@ -199,11 +209,12 @@ Do **not** invent: project-specific terminology, names, facts, or claims to "rep
 - **Preserve voice.** A rewrite that sounds like a different LLM's house style is still a tell, just a different one. Match the user's register.
 - **Tricolons aren't always AI.** Quoted speech, slogans, established rhetoric ("life, liberty, and the pursuit of happiness") use the rule of three for a reason. Flag only decorative ones.
 - **Negative parallelism has legitimate uses.** "Not the man we knew, but the man he had become" is prose. The tell is the shallow decorative form.
-- **Em dashes are not banned.** A few em dashes are normal. The tell is *flooding*. The script reports counts so you can decide.
+- **Em dashes are not banned.** A few em dashes are normal. The tell is *flooding*. Count them yourself when the density looks suspicious.
 - **Curly quotes can be intentional.** Print, ebook, and some CMS pipelines want curly quotes. Convert only if the surrounding document uses straight quotes (or vice versa).
 - **One-sentence paragraphs aren't always AI.** A single short paragraph for emphasis is a normal rhetorical move. The cadence tell is the pattern across the whole post (most paragraphs short, plus pivot phrases, plus rhetorical-question closer).
-- **Non-English input: lexicon is unavailable, categories still apply.** Skip `scripts/scan.py`. Don't translate the English vocabulary list into the target language and pattern-match — invent nothing the source doesn't cover. The detector subagent applies categories using its own knowledge of the language. Note in the change log that the lexical scan was skipped.
-- **The script is a fact sheet, not a verdict.** It counts; the agent decides.
+- **Concession blocks are legitimate in FAQs, RFCs, and "Non-goals" sections.** A spec answering "is this a replacement for X?" or a doc's explicit non-goals list is the right register — the reader actually arrives with those questions. The tell is when a personal essay, blog post, or LinkedIn-style argument bolts on a *"What this isn't"* / *"To be clear:"* list of three or four parallel denials to seem balanced.
+- **Non-English input: lexicon is unavailable, categories still apply.** Don't translate the English vocabulary list into the target language and pattern-match — invent nothing the source doesn't cover. The detector subagent applies categories using its own knowledge of the language.
+- **No regex scanners, no lexical scripts.** Detect tells by reading. AI-shaped writing is a *register* problem — substring matchers miss the signal and produce false positives on legitimate prose (a tutorial's "If you run X" is fine; a LinkedIn essay's "If you X, you Y" is the tell).
 - **Don't sanitise the user's intentional voice.** If a sentence is florid because the user *wants* it florid, leave it. Ask if unsure.
 
 ## References
@@ -211,10 +222,6 @@ Do **not** invent: project-specific terminology, names, facts, or claims to "rep
 - **`references/VOCABULARY.md`** — neutral replacements for flagged words plus the era timeline (which words dominated 2023→mid-2024 vs. mid-2024→mid-2025 vs. mid-2025→).
 - **`references/EXAMPLES.md`** — extended before/after rewrites for each category, plus worked-example inventories on long-form prose.
 - **`references/PUNCTUATION.md`** — em dashes and curly quotes in detail.
-
-## Available scripts
-
-- **`scripts/scan.py`** — English-only mechanical fact sheet. Pipe the prose to stdin (or pass `--file PATH`); receive a JSON report with vocabulary hits, em-dash count, curly-quote count, and per-paragraph stats. Run with `--help` for usage. Reports facts only — does not classify structural tells. For non-English input, skip this script.
 
 ## Output
 
@@ -242,8 +249,6 @@ P1-P8 · cadence    · 6 of 8 one-sentence paragraphs     · rewrite   · Linked
 - [neg-parallel] L7 "isn't X — it's Y" → split into two sentences
 - [em-dash] L18 10 dashes → 4
 - [cadence] P1-P8 → consolidated into 3 normal paragraphs
-
-Lexical scan: <ran on English | skipped, input is <language>>
 ```
 
 State facts. Don't market the result.

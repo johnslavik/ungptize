@@ -4,7 +4,7 @@
     {
       "id": "happy-path-english",
       "prompt": "ungptize this for me:\n\nThis pivotal release boasts a vibrant tapestry of features, fostering not just productivity, but a meticulous, robust, intricate experience. The library serves as a key showcase of our work — and stands as a testament to the team's enduring commitment.",
-      "expected_output": "The agent runs scripts/scan.py for the fact sheet, spawns a detector subagent (or otherwise produces an exhaustive inventory) covering vocabulary cluster, copulative avoidance, negative parallelism, and tricolon. The inventory appears BEFORE the rewrite. The rewrite is substantially shorter, preserves the factual claims (a release with features; a library), and the change log is the inventory filtered to `rewrite` rows.",
+      "expected_output": "The agent spawns a detector subagent (or otherwise produces an exhaustive inventory) covering vocabulary cluster, copulative avoidance, negative parallelism, and tricolon. The inventory appears BEFORE the rewrite. The rewrite is substantially shorter, preserves the factual claims (a release with features; a library), and the change log is the inventory filtered to `rewrite` rows.",
       "files": [],
       "assertions": [
         "The response contains an inventory section before the rewrite (e.g., a heading like '## Inventory' or a clearly labelled list of findings precedes the rewritten prose)",
@@ -63,11 +63,10 @@
     {
       "id": "non-english-structural",
       "prompt": "Możesz to ungptize? Brzmi jak ChatGPT:\n\nTo nie tylko narzędzie, to doświadczenie. Solidne, niezawodne, dopracowane — fundament nowoczesnego rozwoju oprogramowania.",
-      "expected_output": "The agent recognizes the input as Polish, skips scripts/scan.py (English-only), and the detector subagent (or main agent) applies the structural rules from SKILL.md using its own knowledge of Polish — flags the negative parallelism ('to nie tylko X, to Y'), the tricolon ('solidne, niezawodne, dopracowane'), and the em-dash construction. Produces a rewrite in Polish, plus a change log noting that the lexical scan was skipped because the input is not English.",
+      "expected_output": "The agent recognizes the input as Polish and applies the structural rules from SKILL.md using its own knowledge of Polish — flags the negative parallelism ('to nie tylko X, to Y'), the tricolon ('solidne, niezawodne, dopracowane'), and the em-dash construction. The English vocabulary list (`references/VOCABULARY.md`) is not pattern-matched against the Polish input. Produces a rewrite in Polish plus an inventory or change log identifying the structural tells.",
       "files": [],
       "assertions": [
         "The response contains a rewritten version of the input in Polish",
-        "The response notes that the lexical scan was skipped (input is not English) — phrasing like 'lexical scan: skipped' or 'skipped, input is Polish' is present",
         "The inventory or change log identifies at least one of: negative-parallelism, tricolon, em-dash flooding",
         "The agent does not pattern-match the English vocabulary list against the Polish input",
         "The rewrite preserves the underlying factual content (a tool / foundation / for software development)"

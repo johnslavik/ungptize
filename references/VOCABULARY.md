@@ -48,7 +48,7 @@ When you see a cluster from a single era, that's a strong signal the prose was g
 
 ## How to use this list
 
-1. Cross-reference flagged words from `scripts/scan.py`.
+1. While reading the input, note words from this list that appear.
 2. For each hit, ask: *Is this word doing real work in this sentence?* If yes, leave it. If no — if removing it doesn't change the meaning — replace or delete.
 3. Prefer **delete** over **replace** when the word is purely decorative. "This crucial improvement" → "This improvement" beats "This important improvement".
 4. Don't replace one tell with another tell. Going from *delve* to *explore* is sideways motion; both are AI-shaped. Use the plain replacements above.

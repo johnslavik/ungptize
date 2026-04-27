@@ -8,13 +8,13 @@ An [Agent Skill](https://agentskills.io) that strips AI-writing tells from prose
 
 Given prose the user suspects is AI-shaped, the skill:
 
-1. Identifies the input language. If English, runs `scripts/scan.py` for a mechanical pass over the catalogued vocabulary, em-dash density, curly quotes, and naive structural matches.
-2. Categorises candidate tells across the five language-and-grammar patterns Wikipedia documents — overused vocabulary, copulative avoidance, negative parallelisms, the rule of three, and elegant variation.
+1. Reads the input. The agent — not a regex scanner — does the detection. AI tells are about *register* and *cluster density*, which substring matchers miss and false-positive on.
+2. Spawns a detector subagent (phase 1) that produces an exhaustive inventory of candidate tells across the categories: vocabulary, copulative avoidance, negative parallelisms, rule-of-three tricolons, elegant variation, pre-emptive concession blocks, LinkedIn-style cadence, em-dash flooding, and curly-quote conventions.
 3. Applies the *clustering* rule (single neutral usages stay; clusters get rewritten) to avoid scrubbing prose that just happens to use a flagged word.
-4. Rewrites while preserving meaning, voice, and register. Doesn't invent content to fill gaps.
-5. Returns the rewrite with a tell-by-tell change log.
+4. Rewrites (phase 2) while preserving meaning, voice, and register. Doesn't invent content to fill gaps.
+5. Returns the inventory, the rewrite, and a tell-by-tell change log.
 
-For non-English input, the lexical scan is skipped. The structural rules (negative parallelism, rule of three, elegant variation, copulative avoidance, em-dash flooding) generalise across languages — the agent applies them using its own multilingual fluency. The change log notes the skipped lexical scan.
+The English vocabulary list in `references/VOCABULARY.md` is English-specific. The structural categories generalise across languages — for non-English input, the agent applies them using its own multilingual fluency.
 
 ## Install
 
@@ -38,8 +38,6 @@ ungptize/
 │   ├── VOCABULARY.md      # 24-word AI-overused list + replacements + era timeline
 │   ├── EXAMPLES.md        # before/after rewrites per category, ambiguous cases
 │   └── PUNCTUATION.md     # em dashes, curly quotes
-├── scripts/
-│   └── scan.py            # English-only mechanical scan, JSON report on stdout
 ├── evals/
 │   └── evals.json         # 3 cases: dense English, near-miss neutral, non-English structural
 ├── LICENSE
